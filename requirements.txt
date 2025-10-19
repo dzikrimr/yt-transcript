@@ -1,4 +1,6 @@
 Flask
-youtube-transcript-api==0.6.2
 gunicorn
 requests
+yt-dlp
+openai-whisper
+setuptools-rust
