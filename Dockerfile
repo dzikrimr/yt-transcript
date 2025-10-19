@@ -1,21 +1,19 @@
-# Gunakan base image Python yang ringan dan resmi
-FROM python:3.9-slim
+# Gunakan base image Python yang lebih lengkap untuk kemudahan instalasi
+FROM python:3.9
 
-# Set direktori kerja di dalam container
+# Set direktori kerja
 WORKDIR /app
 
-# Salin file requirements terlebih dahulu untuk optimasi cache Docker
-COPY requirements.txt .
+# Install ffmpeg, sebuah dependency penting untuk Whisper
+RUN apt-get update && apt-get install -y ffmpeg
 
-# Install semua library yang dibutuhkan
+# Salin dan install library Python
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Salin sisa kode aplikasi Anda ke dalam direktori kerja
+# Salin sisa kode aplikasi
 COPY . .
 
-# Beri tahu Docker bahwa container akan berjalan di port 8000
+# Expose port dan jalankan server
 EXPOSE 8000
-
-# Perintah untuk menjalankan aplikasi menggunakan Gunicorn saat container dimulai
-# --bind 0.0.0.0:8000 penting agar bisa diakses dari luar container
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "main:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "120", "main:app"]
