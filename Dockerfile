@@ -1,19 +1,18 @@
-# Gunakan base image Python yang lebih lengkap untuk kemudahan instalasi
-FROM python:3.9
+# Gunakan image dasar Python 3.10 (cukup stabil untuk Whisper)
+FROM python:3.10-slim
 
-# Set direktori kerja
+# Instal dependensi sistem (ffmpeg dibutuhkan oleh whisper & yt_dlp)
+RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
+
+# Buat folder kerja
 WORKDIR /app
 
-# Install ffmpeg, sebuah dependency penting untuk Whisper
-RUN apt-get update && apt-get install -y ffmpeg
-
-# Salin dan install library Python
+# Salin file requirements dan install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Salin sisa kode aplikasi
+# Salin seluruh project
 COPY . .
 
-# Expose port dan jalankan server
-EXPOSE 8000
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "120", "main:app"]
+# Jalankan aplikasi Flask
+CMD ["python", "main.py"]

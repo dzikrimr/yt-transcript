@@ -1,58 +1,54 @@
-import os
 from flask import Flask, request, jsonify
 import yt_dlp
 import whisper
+import os
 
 app = Flask(__name__)
 
-# Muat model Whisper. Model "base" adalah kompromi yang baik antara kecepatan dan akurasi.
-print("Loading Whisper model...")
-model = whisper.load_model("base")
-print("Whisper model loaded.")
-
 @app.route("/")
 def index():
-    return "yt-dlp + Whisper API is running!"
+    return "Whisper Transcript API is running!"
 
 @app.route("/get_transcript")
 def get_transcript():
-    video_id = request.args.get('id')
+    video_id = request.args.get("id")
     if not video_id:
-        return jsonify({"error": "Parameter 'id' video YouTube diperlukan."}), 400
+        return jsonify({"error": "Parameter 'id' diperlukan."}), 400
 
     video_url = f"https://www.youtube.com/watch?v={video_id}"
-    # Path untuk menyimpan file audio sementara
-    audio_path = f"/tmp/{video_id}.m4a"
+    audio_path = "audio.mp3"
 
     try:
-        # Konfigurasi yt-dlp untuk download audio terbaik dengan format m4a
+        # --- 1️⃣ Download audio ---
         ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio',
-            'outtmpl': audio_path,
-            'quiet': True,
+            "format": "bestaudio/best",
+            "outtmpl": "audio.%(ext)s",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+            "quiet": True
         }
 
-        # Download audio menggunakan yt-dlp
-        print(f"Downloading audio for {video_id}...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
-        print("Audio downloaded.")
 
-        # Transkripsi audio menggunakan Whisper
-        print(f"Transcribing audio for {video_id}...")
-        result = model.transcribe(audio_path, fp16=False) # fp16=False untuk kompatibilitas CPU
-        full_text = result["text"]
-        print("Transcription complete.")
+        # --- 2️⃣ Transcribe pakai Whisper ---
+        model = whisper.load_model("base")  # bisa 'tiny', 'base', 'small', 'medium', 'large'
+        result = model.transcribe(audio_path, language="id")
 
-        return jsonify({"transcript": full_text})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500 # Gunakan 500 untuk Internal Server Error
-    finally:
-        # Selalu hapus file audio sementara setelah selesai, baik berhasil maupun gagal
+        # --- 3️⃣ Hapus file audio setelah selesai ---
         if os.path.exists(audio_path):
             os.remove(audio_path)
-            print(f"Cleaned up temporary file: {audio_path}")
+
+        return jsonify({"transcript": result["text"]})
+
+    except Exception as e:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000)
