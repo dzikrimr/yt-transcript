@@ -34,6 +34,9 @@ def summarize():
             "-x",
             "--audio-format", "mp3",
             "-o", audio_path,
+            "--max-filesize", "50M",  # batasi ukuran
+            "--no-playlist",
+            "--quiet",
             youtube_url
         ], check=True)
 
