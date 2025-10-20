@@ -1,13 +1,27 @@
 import os
+import re
 from flask import Flask, request, jsonify
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+from pytube import YouTube
+from pytube.exceptions import PytubeError
 
 app = Flask(__name__)
 
 @app.route("/")
 def index():
     # Rute dasar untuk mengecek apakah server berjalan
-    return "Transcript API is running!"
+    return "pytube Transcript API is running!"
+
+def parse_srt(srt_text):
+    """Fungsi sederhana untuk membersihkan teks SRT menjadi kalimat biasa."""
+    lines = srt_text.splitlines()
+    text_lines = []
+    for line in lines:
+        # Abaikan baris yang berisi angka (nomor urut) atau timestamp (-->)
+        if not line.strip().isdigit() and '-->' not in line and line.strip():
+            # Hapus tag HTML seperti <i...> (untuk teks miring)
+            clean_line = re.sub(r'<.*?>', '', line)
+            text_lines.append(clean_line.strip())
+    return " ".join(text_lines)
 
 @app.route("/get_transcript")
 def get_transcript():
@@ -15,28 +29,29 @@ def get_transcript():
     if not video_id:
         return jsonify({"error": "Parameter 'id' video YouTube diperlukan."}), 400
 
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
     try:
-        # Mencoba mengambil transkrip dalam bahasa Indonesia, jika gagal coba Inggris
-        # Ini akan otomatis mencari transkrip yang dibuat manual ATAU yang dibuat otomatis oleh YouTube
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['id', 'en'])
+        yt = YouTube(video_url)
         
-        # Menggabungkan semua teks menjadi satu string panjang, dipisahkan spasi
-        full_text = " ".join([item['text'] for item in transcript_list])
-        
+        # Cari transkrip: prioritas manual bahasa Inggris, lalu otomatis Inggris, lalu manual Indonesia
+        caption = yt.captions.get_by_language_code('en') or yt.captions.get_by_language_code('a.en') or yt.captions.get_by_language_code('id')
+
+        if not caption:
+            return jsonify({"error": "Tidak ditemukan transkrip dalam bahasa Inggris atau Indonesia untuk video ini."}), 404
+
+        # Dapatkan transkrip dalam format SRT dan bersihkan
+        srt_captions = caption.generate_srt_captions()
+        full_text = parse_srt(srt_captions)
+
         return jsonify({"transcript": full_text})
 
-    except TranscriptsDisabled:
-        # Error spesifik jika pemilik video menonaktifkan fitur transkrip
-        return jsonify({"error": f"Transkrip dinonaktifkan untuk video ID: {video_id}"}), 404
-    
-    except NoTranscriptFound:
-        # Error spesifik jika tidak ada transkrip dalam bahasa yang dicari (id atau en)
-        return jsonify({"error": f"Tidak ditemukan transkrip dalam bahasa Indonesia atau Inggris untuk video ID: {video_id}"}), 404
-
+    except PytubeError as e:
+        # Tangani error spesifik dari pytube (misal: video tidak ada, dibatasi usia, dll)
+        return jsonify({"error": f"Pytube Error: {str(e)}"}), 500
     except Exception as e:
-        # Error umum untuk semua masalah lain (misal: video tidak ada, video pribadi, dll)
-        return jsonify({"error": str(e)}), 500
+        # Tangani semua error lainnya
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 if __name__ == "__main__":
-    # Baris ini hanya untuk testing di komputer lokal, tidak digunakan oleh Gunicorn di Railway
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
