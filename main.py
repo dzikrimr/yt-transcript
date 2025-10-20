@@ -1,69 +1,39 @@
-import os
-import re
-from flask import Flask, request, jsonify
-from pytube import YouTube, cipher
-from pytube.exceptions import PytubeError
+from fastapi import FastAPI, Query
+import httpx
 
-app = Flask(__name__)
+app = FastAPI()
 
-# --- TAMBAHAN KODE UNTUK MEMPERBAIKI MASALAH UMUM PYTUBE ---
-# pytube sering gagal dengan error 400 karena perubahan cipher di YouTube
-# Kode ini mencoba memperbaiki fungsi cipher secara dinamis.
-try:
-    cipher.get_throttling_function_name = cipher.get_throttling_function_name
-    print("pytube cipher patch already applied.")
-except AttributeError:
-    print("Applying pytube cipher patch...")
-    from pytube.cipher import get_throttling_function_name as main_get_throttling_function_name
-    def patched_get_throttling_function_name(js: str) -> str:
-        # Panggil fungsi asli, jika gagal, gunakan solusi fallback
-        try:
-            return main_get_throttling_function_name(js)
-        except Exception:
-            # Ini adalah solusi umum jika regex default gagal
-            return 'a' 
-    cipher.get_throttling_function_name = patched_get_throttling_function_name
-# --- AKHIR BAGIAN PERBAIKAN ---
+# --- Hardcoded API Key di sini ---
+GOOGLE_API_KEY = "AIzaSyCOLyWY92S56k5FVSWlXv0asoVwXKFKq4g"
 
+@app.get("/nearby_places")
+async def nearby_places(
+    query: str = Query(..., example="rumah sakit Malang"),
+    latitude: float = Query(...),
+    longitude: float = Query(...)
+):
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    params = {
+        "query": query,
+        "location": f"{latitude},{longitude}",
+        "radius": 5000,  # radius dalam meter
+        "key": GOOGLE_API_KEY
+    }
 
-@app.route("/")
-def index():
-    return "pytube Transcript API (Patched) is running!"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, params=params)
+        data = response.json()
 
-def parse_srt(srt_text):
-    lines = srt_text.splitlines()
-    text_lines = []
-    for line in lines:
-        if not line.strip().isdigit() and '-->' not in line and line.strip():
-            clean_line = re.sub(r'<.*?>', '', line)
-            text_lines.append(clean_line.strip())
-    return " ".join(text_lines)
+    # Ambil field penting saja
+    results = []
+    for place in data.get("results", []):
+        results.append({
+            "id": place.get("place_id"),
+            "name": place.get("name"),
+            "address": place.get("formatted_address"),
+            "lat": place["geometry"]["location"]["lat"],
+            "lng": place["geometry"]["location"]["lng"],
+            "rating": place.get("rating")
+        })
 
-@app.route("/get_transcript")
-def get_transcript():
-    video_id = request.args.get('id')
-    if not video_id:
-        return jsonify({"error": "Parameter 'id' video YouTube diperlukan."}), 400
-
-    video_url = f"https://www.youtube.com/watch?v={video_id}"
-
-    try:
-        yt = YouTube(video_url)
-        
-        caption = yt.captions.get_by_language_code('en') or yt.captions.get_by_language_code('a.en') or yt.captions.get_by_language_code('id')
-
-        if not caption:
-            return jsonify({"error": "Tidak ditemukan transkrip dalam bahasa Inggris atau Indonesia untuk video ini."}), 404
-
-        srt_captions = caption.generate_srt_captions()
-        full_text = parse_srt(srt_captions)
-
-        return jsonify({"transcript": full_text})
-
-    except PytubeError as e:
-        return jsonify({"error": f"Pytube Error: {str(e)}"}), 500
-    except Exception as e:
-        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    return {"places": results}

@@ -1,20 +1,20 @@
-# Gunakan base image Python yang ringan dan resmi
-FROM python:3.9-slim
+# Gunakan Python versi 3.11 slim
+FROM python:3.11-slim
 
-# Set direktori kerja di dalam container
+# Set working directory
 WORKDIR /app
 
-# Salin file requirements terlebih dahulu untuk optimasi cache Docker
+# Copy requirements
 COPY requirements.txt .
 
-# Install semua library yang dibutuhkan, nonaktifkan cache untuk menjaga ukuran image tetap kecil
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Salin sisa kode aplikasi Anda (main.py) ke dalam direktori kerja
+# Copy seluruh kode server
 COPY . .
 
-# Beri tahu Docker bahwa container akan berjalan di port 8000
+# Expose port (Railway akan gunakan PORT environment variable)
 EXPOSE 8000
 
-# Perintah untuk menjalankan aplikasi menggunakan Gunicorn saat container dimulai
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "main:app"]
+# Jalankan FastAPI dengan uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

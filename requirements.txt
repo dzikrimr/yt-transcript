@@ -1,4 +1,3 @@
-Flask==2.3.3
-gunicorn==21.2.0
-requests==2.31.0
-pytube==15.0.0
+fastapi==0.111.1
+uvicorn[standard]==0.23.2
+httpx==1.37.0
