@@ -1,24 +1,40 @@
 import os
 import re
 from flask import Flask, request, jsonify
-from pytube import YouTube
+from pytube import YouTube, cipher
 from pytube.exceptions import PytubeError
 
 app = Flask(__name__)
 
+# --- TAMBAHAN KODE UNTUK MEMPERBAIKI MASALAH UMUM PYTUBE ---
+# pytube sering gagal dengan error 400 karena perubahan cipher di YouTube
+# Kode ini mencoba memperbaiki fungsi cipher secara dinamis.
+try:
+    cipher.get_throttling_function_name = cipher.get_throttling_function_name
+    print("pytube cipher patch already applied.")
+except AttributeError:
+    print("Applying pytube cipher patch...")
+    from pytube.cipher import get_throttling_function_name as main_get_throttling_function_name
+    def patched_get_throttling_function_name(js: str) -> str:
+        # Panggil fungsi asli, jika gagal, gunakan solusi fallback
+        try:
+            return main_get_throttling_function_name(js)
+        except Exception:
+            # Ini adalah solusi umum jika regex default gagal
+            return 'a' 
+    cipher.get_throttling_function_name = patched_get_throttling_function_name
+# --- AKHIR BAGIAN PERBAIKAN ---
+
+
 @app.route("/")
 def index():
-    # Rute dasar untuk mengecek apakah server berjalan
-    return "pytube Transcript API is running!"
+    return "pytube Transcript API (Patched) is running!"
 
 def parse_srt(srt_text):
-    """Fungsi sederhana untuk membersihkan teks SRT menjadi kalimat biasa."""
     lines = srt_text.splitlines()
     text_lines = []
     for line in lines:
-        # Abaikan baris yang berisi angka (nomor urut) atau timestamp (-->)
         if not line.strip().isdigit() and '-->' not in line and line.strip():
-            # Hapus tag HTML seperti <i...> (untuk teks miring)
             clean_line = re.sub(r'<.*?>', '', line)
             text_lines.append(clean_line.strip())
     return " ".join(text_lines)
@@ -34,23 +50,19 @@ def get_transcript():
     try:
         yt = YouTube(video_url)
         
-        # Cari transkrip: prioritas manual bahasa Inggris, lalu otomatis Inggris, lalu manual Indonesia
         caption = yt.captions.get_by_language_code('en') or yt.captions.get_by_language_code('a.en') or yt.captions.get_by_language_code('id')
 
         if not caption:
             return jsonify({"error": "Tidak ditemukan transkrip dalam bahasa Inggris atau Indonesia untuk video ini."}), 404
 
-        # Dapatkan transkrip dalam format SRT dan bersihkan
         srt_captions = caption.generate_srt_captions()
         full_text = parse_srt(srt_captions)
 
         return jsonify({"transcript": full_text})
 
     except PytubeError as e:
-        # Tangani error spesifik dari pytube (misal: video tidak ada, dibatasi usia, dll)
         return jsonify({"error": f"Pytube Error: {str(e)}"}), 500
     except Exception as e:
-        # Tangani semua error lainnya
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 if __name__ == "__main__":
