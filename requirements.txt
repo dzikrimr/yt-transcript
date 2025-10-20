@@ -1,5 +1,3 @@
-Flask
-yt-dlp
-assemblyai
-google-generativeai
+flask
+requests
 gunicorn

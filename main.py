@@ -1,67 +1,58 @@
 from flask import Flask, request, jsonify
-import subprocess
-import os
-import assemblyai as aai
-import google.generativeai as genai
-
-# 🔑 API Keys
-ASSEMBLYAI_API_KEY = "1473e55c39fb4757a910e568f91ec0c2"
-GEMINI_API_KEY = "AIzaSyDR45Ww-yQQqrCHgKYBLA8eXt5t6vBbmqw"
-
-# Konfigurasi API
-aai.settings.api_key = ASSEMBLYAI_API_KEY
-genai.configure(api_key=GEMINI_API_KEY)
+import requests
+import time
 
 app = Flask(__name__)
 
+ASSEMBLYAI_API_KEY = "1473e55c39fb4757a910e568f91ec0c2"
+
+ASSEMBLYAI_TRANSCRIPT_URL = "https://api.assemblyai.com/v2/transcript"
+
+
 @app.route("/")
 def index():
-    return "YouTube Summarizer API is running!"
+    return "🎧 YouTube Transcript API is running!"
 
-@app.route("/summarize", methods=["POST"])
-def summarize():
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
     data = request.get_json()
-    youtube_url = data.get("url")
+    video_url = data.get("url")
 
-    if not youtube_url:
-        return jsonify({"error": "YouTube URL is required"}), 400
+    if not video_url:
+        return jsonify({"error": "Parameter 'url' diperlukan"}), 400
 
     try:
-        # 1️⃣ Unduh audio dari YouTube pakai yt-dlp
-        audio_path = "audio.mp3"
-        subprocess.run([
-            "yt-dlp",
-            "-x",
-            "--audio-format", "mp3",
-            "-o", audio_path,
-            "--max-filesize", "50M",  # batasi ukuran
-            "--no-playlist",
-            "--quiet",
-            youtube_url
-        ], check=True)
+        # 1️⃣ Kirim video YouTube ke AssemblyAI
+        transcript_request = requests.post(
+            ASSEMBLYAI_TRANSCRIPT_URL,
+            headers={"authorization": ASSEMBLYAI_API_KEY},
+            json={"audio_url": video_url, "language_detection": True},
+        )
 
-        # 2️⃣ Upload ke AssemblyAI
-        transcriber = aai.Transcriber()
-        transcript = transcriber.transcribe(audio_path)
+        transcript_id = transcript_request.json().get("id")
+        if not transcript_id:
+            return jsonify({"error": "Gagal memulai transkripsi"}), 500
 
-        if transcript.status != "completed":
-            return jsonify({"error": "Transcription failed"}), 500
+        # 2️⃣ Tunggu proses selesai
+        while True:
+            poll = requests.get(
+                f"{ASSEMBLYAI_TRANSCRIPT_URL}/{transcript_id}",
+                headers={"authorization": ASSEMBLYAI_API_KEY},
+            )
+            status = poll.json()["status"]
 
-        text = transcript.text
+            if status == "completed":
+                text = poll.json()["text"]
+                return jsonify({
+                    "status": "success",
+                    "transcript": text
+                })
 
-        # 3️⃣ Kirim ke Gemini buat diringkas
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = f"Please summarize this YouTube video transcript:\n\n{text}"
+            elif status == "error":
+                return jsonify({"error": poll.json().get("error", "Gagal transkripsi")}), 500
 
-        response = model.generate_content(prompt)
-        summary = response.text
-
-        # 4️⃣ Hapus file audio setelah selesai
-        os.remove(audio_path)
-
-        return jsonify({
-            "summary": summary
-        })
+            time.sleep(5)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
