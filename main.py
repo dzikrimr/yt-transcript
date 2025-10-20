@@ -1,54 +1,68 @@
 from flask import Flask, request, jsonify
-import yt_dlp
-import whisper
+import subprocess
 import os
+import assemblyai as aai
+import google.generativeai as genai
+
+# 🔑 API Keys
+ASSEMBLYAI_API_KEY = "1473e55c39fb4757a910e568f91ec0c2"
+GEMINI_API_KEY = "AIzaSyDR45Ww-yQQqrCHgKYBLA8eXt5t6vBbmqw"
+
+# Konfigurasi API
+aai.settings.api_key = ASSEMBLYAI_API_KEY
+genai.configure(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "Whisper Transcript API is running!"
+    return "YouTube Summarizer API is running!"
 
-@app.route("/get_transcript")
-def get_transcript():
-    video_id = request.args.get("id")
-    if not video_id:
-        return jsonify({"error": "Parameter 'id' diperlukan."}), 400
+@app.route("/summarize", methods=["POST"])
+def summarize():
+    data = request.get_json()
+    youtube_url = data.get("url")
 
-    video_url = f"https://www.youtube.com/watch?v={video_id}"
-    audio_path = "audio.mp3"
+    if not youtube_url:
+        return jsonify({"error": "YouTube URL is required"}), 400
 
     try:
-        # --- 1️⃣ Download audio ---
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": "audio.%(ext)s",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
-            "quiet": True
-        }
+        # 1️⃣ Unduh audio dari YouTube pakai yt-dlp
+        audio_path = "audio.mp3"
+        subprocess.run([
+            "yt-dlp",
+            "-x",
+            "--audio-format", "mp3",
+            "-o", audio_path,
+            youtube_url
+        ], check=True)
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
+        # 2️⃣ Upload ke AssemblyAI
+        transcriber = aai.Transcriber()
+        transcript = transcriber.transcribe(audio_path)
 
-        # --- 2️⃣ Transcribe pakai Whisper ---
-        model = whisper.load_model("base")  # bisa 'tiny', 'base', 'small', 'medium', 'large'
-        result = model.transcribe(audio_path, language="id")
+        if transcript.status != "completed":
+            return jsonify({"error": "Transcription failed"}), 500
 
-        # --- 3️⃣ Hapus file audio setelah selesai ---
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
+        text = transcript.text
 
-        return jsonify({"transcript": result["text"]})
+        # 3️⃣ Kirim ke Gemini buat diringkas
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = f"Please summarize this YouTube video transcript:\n\n{text}"
+
+        response = model.generate_content(prompt)
+        summary = response.text
+
+        # 4️⃣ Hapus file audio setelah selesai
+        os.remove(audio_path)
+
+        return jsonify({
+            "summary": summary
+        })
 
     except Exception as e:
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
         return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)
